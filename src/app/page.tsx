@@ -4,24 +4,15 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendingUp, Settings, Loader2, Zap, Shield, ArrowDownLeft } from "lucide-react";
+import { TrendingUp, Settings, Loader2, Zap, Shield, ArrowDownLeft, ExternalLink } from "lucide-react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { parseEther, formatEther } from "viem";
 import { VAULT_ADDRESS, VAULT_ABI } from "@/lib/contract";
 
-const MOCK_TRANSACTIONS = [
-  { id: 1, name: "Starbucks", amount: 4.60, roundup: 0.40, date: "Today, 9:12am", icon: "☕" },
-  { id: 2, name: "Uber", amount: 12.30, roundup: 0.70, date: "Today, 8:45am", icon: "🚗" },
-  { id: 3, name: "Spotify", amount: 9.99, roundup: 0.01, date: "Yesterday", icon: "🎵" },
-  { id: 4, name: "Amazon", amount: 23.75, roundup: 0.25, date: "Yesterday", icon: "📦" },
-  { id: 5, name: "Swiggy", amount: 187.00, roundup: 1.00, date: "2 days ago", icon: "🍔" },
-];
-
 type DepositEntry = {
-  amount: string;
-  ethAmount: string;
+  spendAmount: string;
+  savedAmount: string;
   timestamp: string;
   txHash: string;
 };
@@ -35,15 +26,16 @@ export default function Dashboard() {
   const [coachInsight, setCoachInsight] = useState<string | null>(null);
   const [isLoadingInsight, setIsLoadingInsight] = useState(false);
   const [pulseBalance, setPulseBalance] = useState(false);
-  const [depositHistory, setDepositHistory] = useState<DepositEntry[]>([]);
+  const [activityFeed, setActivityFeed] = useState<DepositEntry[]>([]);
+
+  const lastSpend = useRef<string>("0");
+  const lastRoundup = useRef<string>("0");
   const lastEthAmount = useRef<string>("0");
 
-  // load history from localStorage on mount
   useEffect(() => {
     if (!address) return;
-    const key = `roundup_history_${address}`;
-    const saved = localStorage.getItem(key);
-    if (saved) setDepositHistory(JSON.parse(saved));
+    const saved = localStorage.getItem(`roundup_history_${address}`);
+    if (saved) setActivityFeed(JSON.parse(saved));
   }, [address]);
 
   const { data: vaultInfo, refetch: refetchVault } = useReadContract({
@@ -92,14 +84,14 @@ export default function Dashboard() {
       setTimeout(() => setLatestRoundup(null), 3000);
       setTimeout(() => setPulseBalance(false), 1000);
 
-      // save to localStorage
       const newEntry: DepositEntry = {
-        amount: latest.toFixed(2),
-        ethAmount: lastEthAmount.current,
+        spendAmount: lastSpend.current,
+        savedAmount: lastRoundup.current,
         timestamp: new Date().toLocaleString(),
         txHash: depositTxHash,
       };
-      setDepositHistory((prev) => {
+
+      setActivityFeed((prev) => {
         const updated = [newEntry, ...prev];
         localStorage.setItem(`roundup_history_${address}`, JSON.stringify(updated));
         return updated;
@@ -108,12 +100,10 @@ export default function Dashboard() {
       setPendingDeposit(null);
     }
 
-    if (withdrawSuccess) {
+    if (withdrawSuccess && address) {
       refetchVault();
-      if (address) {
-        localStorage.removeItem(`roundup_history_${address}`);
-        setDepositHistory([]);
-      }
+      localStorage.removeItem(`roundup_history_${address}`);
+      setActivityFeed([]);
     }
   }, [depositSuccess, withdrawSuccess]);
 
@@ -122,6 +112,9 @@ export default function Dashboard() {
     const spend = parseFloat((Math.random() * 20 + 2).toFixed(2));
     const roundup = parseFloat((Math.ceil(spend) - spend).toFixed(2));
     const roundupEth = roundup * 0.0001;
+
+    lastSpend.current = spend.toFixed(2);
+    lastRoundup.current = roundup.toFixed(2);
     lastEthAmount.current = roundupEth.toFixed(6);
 
     setTimeout(() => {
@@ -303,71 +296,45 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Tabs */}
+            {/* Activity Feed */}
             <div className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
-              <Tabs defaultValue="recent">
-                <div className="px-4 pt-4">
-                  <TabsList className="bg-white/5 border border-white/5 h-8">
-                    <TabsTrigger value="recent" className="text-xs h-6">Recent</TabsTrigger>
-                    <TabsTrigger value="vault" className="text-xs h-6">Vault</TabsTrigger>
-                  </TabsList>
-                </div>
-
-                {/* Recent */}
-                <TabsContent value="recent" className="p-2 space-y-1">
-                  {MOCK_TRANSACTIONS.map((tx) => (
-                    <div key={tx.id} className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors">
+              <div className="px-4 pt-4 pb-2">
+                <p className="text-slate-500 text-xs uppercase tracking-widest">Activity</p>
+              </div>
+              {activityFeed.length === 0 ? (
+                <p className="text-center text-slate-600 text-sm py-6 px-4">
+                  No activity yet — simulate a purchase to get started!
+                </p>
+              ) : (
+                <div className="p-2 space-y-1">
+                  {activityFeed.map((tx, i) => (
+                    <a
+                      key={i}
+                      href={`https://evm-testnet.flowscan.io/tx/${tx.txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors group"
+                    >
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-sm">
-                          {tx.icon}
+                        <div className="w-8 h-8 rounded-lg bg-emerald-400/10 flex items-center justify-center text-sm shrink-0">
+                          ✦
                         </div>
                         <div>
-                          <p className="text-sm font-medium">{tx.name}</p>
-                          <p className="text-slate-600 text-xs">{tx.date}</p>
+                          <p className="text-sm font-medium">Purchase Roundup</p>
+                          <p className="text-slate-600 text-xs">{tx.timestamp}</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm text-slate-400">-${tx.amount.toFixed(2)}</p>
-                        <p className="text-xs text-emerald-400">+${tx.roundup.toFixed(2)} saved</p>
+                      <div className="text-right flex items-center gap-2">
+                        <div>
+                          <p className="text-sm text-slate-400">-${tx.spendAmount}</p>
+                          <p className="text-xs text-emerald-400">+${tx.savedAmount} saved</p>
+                        </div>
+                        <ExternalLink className="w-3 h-3 text-slate-600 group-hover:text-slate-400 transition-colors" />
                       </div>
-                    </div>
+                    </a>
                   ))}
-                </TabsContent>
-
-                {/* Vault — localStorage history with tx links */}
-                <TabsContent value="vault" className="p-2 space-y-1">
-                  {depositHistory.length === 0 ? (
-                    <p className="text-center text-slate-600 text-sm py-6">
-                      No deposits yet — make your first roundup!
-                    </p>
-                  ) : (
-                    depositHistory.map((tx, i) => (
-                      <a
-                        key={i}
-                        href={`https://evm-testnet.flowscan.io/tx/${tx.txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors group"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-400/10 flex items-center justify-center text-sm">
-                            ✦
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium">Roundup Deposit</p>
-                            <p className="text-slate-600 text-xs">{tx.timestamp}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs text-emerald-400">+${tx.amount} saved</p>
-                          <p className="text-slate-600 text-xs group-hover:text-slate-400 transition-colors">view tx →</p>
-                        </div>
-                      </a>
-                    ))
-                  )}
-                </TabsContent>
-
-              </Tabs>
+                </div>
+              )}
             </div>
 
           </div>
