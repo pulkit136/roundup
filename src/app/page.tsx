@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendingUp, Settings, Wallet, Loader2, Zap, Shield, ArrowDownLeft } from "lucide-react";
+import { TrendingUp, Settings, Loader2, Zap, Shield, ArrowDownLeft } from "lucide-react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { parseEther, formatEther } from "viem";
@@ -20,6 +19,13 @@ const MOCK_TRANSACTIONS = [
   { id: 5, name: "Swiggy", amount: 187.00, roundup: 1.00, date: "2 days ago", icon: "🍔" },
 ];
 
+type DepositEntry = {
+  amount: string;
+  ethAmount: string;
+  timestamp: string;
+  txHash: string;
+};
+
 export default function Dashboard() {
   const { isConnected, address } = useAccount();
   const [roundupEnabled, setRoundupEnabled] = useState(true);
@@ -29,6 +35,16 @@ export default function Dashboard() {
   const [coachInsight, setCoachInsight] = useState<string | null>(null);
   const [isLoadingInsight, setIsLoadingInsight] = useState(false);
   const [pulseBalance, setPulseBalance] = useState(false);
+  const [depositHistory, setDepositHistory] = useState<DepositEntry[]>([]);
+  const lastEthAmount = useRef<string>("0");
+
+  // load history from localStorage on mount
+  useEffect(() => {
+    if (!address) return;
+    const key = `roundup_history_${address}`;
+    const saved = localStorage.getItem(key);
+    if (saved) setDepositHistory(JSON.parse(saved));
+  }, [address]);
 
   const { data: vaultInfo, refetch: refetchVault } = useReadContract({
     address: VAULT_ADDRESS,
@@ -67,17 +83,37 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    if (depositSuccess || withdrawSuccess) {
+    if (depositSuccess && depositTxHash && pendingDeposit && address) {
       refetchVault();
-      if (pendingDeposit && depositSuccess) {
-        const latest = parseFloat(pendingDeposit);
-        setLatestRoundup(latest);
-        setPulseBalance(true);
-        fetchCoachInsight(roundupCount + 1, totalSaved, latest);
-        setTimeout(() => setLatestRoundup(null), 3000);
-        setTimeout(() => setPulseBalance(false), 1000);
-      }
+      const latest = parseFloat(pendingDeposit);
+      setLatestRoundup(latest);
+      setPulseBalance(true);
+      fetchCoachInsight(roundupCount + 1, totalSaved, latest);
+      setTimeout(() => setLatestRoundup(null), 3000);
+      setTimeout(() => setPulseBalance(false), 1000);
+
+      // save to localStorage
+      const newEntry: DepositEntry = {
+        amount: latest.toFixed(2),
+        ethAmount: lastEthAmount.current,
+        timestamp: new Date().toLocaleString(),
+        txHash: depositTxHash,
+      };
+      setDepositHistory((prev) => {
+        const updated = [newEntry, ...prev];
+        localStorage.setItem(`roundup_history_${address}`, JSON.stringify(updated));
+        return updated;
+      });
+
       setPendingDeposit(null);
+    }
+
+    if (withdrawSuccess) {
+      refetchVault();
+      if (address) {
+        localStorage.removeItem(`roundup_history_${address}`);
+        setDepositHistory([]);
+      }
     }
   }, [depositSuccess, withdrawSuccess]);
 
@@ -86,6 +122,8 @@ export default function Dashboard() {
     const spend = parseFloat((Math.random() * 20 + 2).toFixed(2));
     const roundup = parseFloat((Math.ceil(spend) - spend).toFixed(2));
     const roundupEth = roundup * 0.0001;
+    lastEthAmount.current = roundupEth.toFixed(6);
+
     setTimeout(() => {
       setIsSimulating(false);
       setPendingDeposit(roundup.toFixed(2));
@@ -104,15 +142,17 @@ export default function Dashboard() {
 
   return (
     <main className="min-h-screen bg-[#080c10] text-white">
-      {/* dot grid background */}
-      <div className="fixed inset-0 opacity-20" style={{
-        backgroundImage: `radial-gradient(circle, #1a2a1a 1px, transparent 1px)`,
-        backgroundSize: "28px 28px"
-      }} />
-
-      {/* green glow top */}
-      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] opacity-10 pointer-events-none"
-        style={{ background: "radial-gradient(ellipse, #00ff88 0%, transparent 70%)" }} />
+      <div
+        className="fixed inset-0 opacity-20"
+        style={{
+          backgroundImage: `radial-gradient(circle, #1a2a1a 1px, transparent 1px)`,
+          backgroundSize: "28px 28px",
+        }}
+      />
+      <div
+        className="fixed top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] opacity-10 pointer-events-none"
+        style={{ background: "radial-gradient(ellipse, #00ff88 0%, transparent 70%)" }}
+      />
 
       <div className="relative max-w-lg mx-auto px-4 py-6 space-y-4">
 
@@ -160,10 +200,14 @@ export default function Dashboard() {
           <div className="space-y-3">
 
             {/* Balance card */}
-            <div className={`relative rounded-2xl overflow-hidden border transition-all duration-500 ${pulseBalance ? "border-emerald-400/60" : "border-white/5"}`}
-              style={{ background: "linear-gradient(135deg, #0d1f12 0%, #080c10 60%)" }}>
-              <div className="absolute top-0 right-0 w-48 h-48 opacity-10"
-                style={{ background: "radial-gradient(circle, #00ff88 0%, transparent 70%)" }} />
+            <div
+              className={`relative rounded-2xl overflow-hidden border transition-all duration-500 ${pulseBalance ? "border-emerald-400/60" : "border-white/5"}`}
+              style={{ background: "linear-gradient(135deg, #0d1f12 0%, #080c10 60%)" }}
+            >
+              <div
+                className="absolute top-0 right-0 w-48 h-48 opacity-10"
+                style={{ background: "radial-gradient(circle, #00ff88 0%, transparent 70%)" }}
+              />
               <div className="relative p-6">
                 <p className="text-slate-500 text-xs uppercase tracking-widest mb-1">Total Saved</p>
                 <p className={`text-4xl font-bold tracking-tight transition-all duration-300 ${pulseBalance ? "text-emerald-400" : "text-white"}`}>
@@ -192,7 +236,10 @@ export default function Dashboard() {
                     size="sm"
                     className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs"
                   >
-                    {isWithdrawing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ArrowDownLeft className="w-3 h-3 mr-1" />}
+                    {isWithdrawing
+                      ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                      : <ArrowDownLeft className="w-3 h-3 mr-1" />
+                    }
                     {isWithdrawing ? "Withdrawing..." : "Withdraw"}
                   </Button>
                 </div>
@@ -232,7 +279,9 @@ export default function Dashboard() {
                 </p>
               )}
               {isDepositing && (
-                <p className="text-center text-slate-600 text-xs mt-2">Confirming on Flow testnet...</p>
+                <p className="text-center text-slate-600 text-xs mt-2">
+                  Confirming on Flow testnet...
+                </p>
               )}
             </div>
 
@@ -254,16 +303,18 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Transactions */}
+            {/* Tabs */}
             <div className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
-              <Tabs defaultValue="transactions">
+              <Tabs defaultValue="recent">
                 <div className="px-4 pt-4">
                   <TabsList className="bg-white/5 border border-white/5 h-8">
-                    <TabsTrigger value="transactions" className="text-xs h-6">Recent</TabsTrigger>
+                    <TabsTrigger value="recent" className="text-xs h-6">Recent</TabsTrigger>
                     <TabsTrigger value="vault" className="text-xs h-6">Vault</TabsTrigger>
                   </TabsList>
                 </div>
-                <TabsContent value="transactions" className="p-2 space-y-1">
+
+                {/* Recent */}
+                <TabsContent value="recent" className="p-2 space-y-1">
                   {MOCK_TRANSACTIONS.map((tx) => (
                     <div key={tx.id} className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors">
                       <div className="flex items-center gap-3">
@@ -282,9 +333,40 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </TabsContent>
-                <TabsContent value="vault" className="p-4 text-center text-slate-600 text-sm">
-                  Vault activity coming soon
+
+                {/* Vault — localStorage history with tx links */}
+                <TabsContent value="vault" className="p-2 space-y-1">
+                  {depositHistory.length === 0 ? (
+                    <p className="text-center text-slate-600 text-sm py-6">
+                      No deposits yet — make your first roundup!
+                    </p>
+                  ) : (
+                    depositHistory.map((tx, i) => (
+                      <a
+                        key={i}
+                        href={`https://evm-testnet.flowscan.io/tx/${tx.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-400/10 flex items-center justify-center text-sm">
+                            ✦
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">Roundup Deposit</p>
+                            <p className="text-slate-600 text-xs">{tx.timestamp}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-emerald-400">+${tx.amount} saved</p>
+                          <p className="text-slate-600 text-xs group-hover:text-slate-400 transition-colors">view tx →</p>
+                        </div>
+                      </a>
+                    ))
+                  )}
                 </TabsContent>
+
               </Tabs>
             </div>
 
